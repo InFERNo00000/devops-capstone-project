@@ -12,6 +12,7 @@ python run.py
 ```
 
 The service listens on `http://localhost:8080`. `GET /health` reports service health.
+Use Python 3.8 for the configured legacy `nosetests` runner.
 
 ## API
 
