@@ -58,7 +58,7 @@ spec:
     - name: kubeconfig
   steps:
     - name: apply-and-rollout
-      image: bitnami/kubectl:1.32.0
+      image: registry.k8s.io/kubectl:v1.32.0
       workingDir: $(workspaces.source.path)
       env:
         - name: KUBECONFIG
