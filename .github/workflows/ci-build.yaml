@@ -161,7 +161,7 @@ jobs:
               name: accounts-cd
             taskRunSpecs:
               - pipelineTaskName: deploy
-                taskServiceAccountName: tekton-deployer
+                serviceAccountName: tekton-deployer
             params:
               - name: git-url
                 value: https://github.com/${{ github.repository }}.git
