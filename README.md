@@ -38,21 +38,22 @@ nosetests
 ```
 
 The `PYTHONPATH` entry provides compatibility aliases for Nose's deprecated
-standard-library APIs on Python 3.11.
+standard-library APIs when running on Python 3.11.
 
 ## Security and deployment
 
 Talisman adds security headers, while Flask-CORS only allows configured origins.
 Set `CORS_ALLOWED_ORIGINS` to a comma-separated origin list and set
 `FORCE_HTTPS=true` behind a correctly configured HTTPS ingress. The Dockerfile
-runs as a non-root user. Kubernetes manifests are in `k8s/`; update the image
-reference in `k8s/deployment.yaml` to the image published by your registry before
-deploying. The SQLite volume is ephemeral and is intended only for the capstone
-demonstration, not a production deployment.
+runs as a non-root user. Kubernetes manifests are in `k8s/`; build and load the
+`accounts-service:capstone` image into your cluster before deploying. The SQLite
+volume is ephemeral and is intended only for the capstone demonstration, not a
+production deployment.
 
-Tekton definitions are in `tekton/`. Install the Tekton Catalog `git-clone` Task
-and apply `tekton/tasks.yaml` and `tekton/pipeline.yaml` to a cluster. A PipelineRun
-must bind a writable source workspace, a registry-auth Secret containing
-`config.json`, and a kubeconfig Secret containing `config`. The cluster must permit
-the Buildah step's privileged security context. These credentials and a successful
-PipelineRun are environment-specific and are not included here.
+Tekton definitions are in `tekton/`. The `accounts-cd` Pipeline clones the
+repository, lints and tests it, builds and pushes an image with Buildah, then
+updates the Kubernetes Deployment. A PipelineRun needs the Tekton Catalog
+`git-clone` Task, a writable source workspace, a registry-auth Secret containing
+`config.json`, and a kubeconfig Secret containing `config`. The target cluster
+must permit the Buildah step's privileged security context and pull from the
+configured registry.

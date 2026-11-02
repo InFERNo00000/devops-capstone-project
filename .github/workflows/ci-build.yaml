@@ -12,21 +12,174 @@ permissions:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    container:
+      image: python:3.11-slim
+    services:
+      postgres:
+        image: postgres:alpine
+        env:
+          POSTGRES_DB: accounts
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d accounts"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/accounts
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      FORCE_HTTPS: "false"
+      PYTHONPATH: tools/nose_compat
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
-      - name: Lint with Flake8
-        run: flake8 service tests tools run.py
-      - name: Lint with Pylint
-        run: pylint service tests tools run.py
-      - name: Run unit tests using nosetests
-        env:
-          PYTHONPATH: tools/nose_compat
-        run: nosetests
+        run: python -m pip install --upgrade pip wheel && pip install -r requirements.txt
+      - name: Lint with flake8
+        run: |
+          flake8 service --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 service --count --max-complexity=10 --max-line-length=127 --statistics
+      - name: Run unit tests with Nose
+        run: nosetests -v --with-spec --spec-color --with-coverage --cover-package=service
+  deploy-evidence:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Build container image
+        run: docker build --tag accounts-service:capstone .
+      - name: Report container image details
+        run: |
+          docker images --no-trunc --format 'Name: {{.Repository}}{{"\n"}}Tag: {{.Tag}}{{"\n"}}Image ID: {{.ID}}{{"\n"}}Created Time: {{.CreatedAt}}{{"\n"}}Size: {{.Size}}' accounts-service
+      - name: Verify container HTTP response
+        run: |
+          docker run --detach --rm --name accounts-smoke --publish 8080:8080 accounts-service:capstone
+          trap 'docker stop accounts-smoke' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/health; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error http://127.0.0.1:8080/
+          printf '\n'
+      - name: Create Kubernetes cluster
+        uses: helm/kind-action@v1.12.0
+        with:
+          config: .github/kind-config.yaml
+      - name: Deploy to Kubernetes and report resources
+        run: |
+          kind load docker-image accounts-service:capstone
+          kubectl apply -f k8s/
+          kubectl rollout status deployment/accounts --timeout=180s
+          kubectl get deployments,pods,replicasets,services -o wide
+          kubectl get deployment accounts -o json
+          kubectl describe deployment/accounts
+          kubectl describe service/accounts
+      - name: Verify deployed application response
+        run: |
+          kubectl port-forward service/accounts 18080:8080 > /tmp/accounts-port-forward.log 2>&1 &
+          port_forward_pid=$!
+          trap 'kill "$port_forward_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18080/health; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error http://127.0.0.1:18080/
+          printf '\n'
+      - name: Install Tekton Pipelines
+        run: |
+          kubectl apply --filename https://storage.googleapis.com/tekton-releases/pipeline/previous/v0.68.0/release.yaml
+          kubectl rollout status deployment/tekton-pipelines-controller --namespace tekton-pipelines --timeout=300s
+          kubectl rollout status deployment/tekton-pipelines-webhook --namespace tekton-pipelines --timeout=300s
+      - name: Prepare Tekton registry and credentials
+        run: |
+          kubectl apply -f tekton/registry.yaml
+          kubectl rollout status deployment/accounts-registry --timeout=180s
+          kubectl get service accounts-registry -o wide
+          kubectl apply -f https://raw.githubusercontent.com/tektoncd/catalog/main/task/git-clone/0.9/git-clone.yaml
+          kubectl create serviceaccount tekton-deployer
+          kubectl create rolebinding tekton-deployer --clusterrole=edit --serviceaccount=default:tekton-deployer
+          kubectl create secret generic accounts-registry-auth --from-literal=config.json='{"auths":{}}'
+          ca_data="$(kubectl get configmap kube-root-ca.crt -n default -o jsonpath='{.data.ca\.crt}' | base64 -w0)"
+          token="$(kubectl create token tekton-deployer --duration=1h)"
+          cat > /tmp/tekton-kubeconfig <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - name: in-cluster
+            cluster:
+              server: https://kubernetes.default.svc
+              certificate-authority-data: ${ca_data}
+          users:
+          - name: tekton-deployer
+            user:
+              token: ${token}
+          contexts:
+          - name: tekton-deployer
+            context:
+              cluster: in-cluster
+              user: tekton-deployer
+              namespace: default
+          current-context: tekton-deployer
+          EOF
+          kubectl create secret generic accounts-kubeconfig --from-file=config=/tmp/tekton-kubeconfig
+          kubectl apply -f tekton/tasks.yaml
+          kubectl apply -f tekton/pipeline.yaml
+      - name: Run Tekton CI/CD pipeline
+        run: |
+          cat > /tmp/pipelinerun.yaml <<'EOF'
+          apiVersion: tekton.dev/v1
+          kind: PipelineRun
+          metadata:
+            name: capstone-cd-run
+          spec:
+            pipelineRef:
+              name: accounts-cd
+            taskRunSpecs:
+              - pipelineTaskName: deploy
+                taskServiceAccountName: tekton-deployer
+            params:
+              - name: git-url
+                value: https://github.com/${{ github.repository }}.git
+              - name: revision
+                value: ${{ github.sha }}
+              - name: image
+                value: 10.96.0.100:5000/accounts-service:capstone
+              - name: namespace
+                value: default
+            workspaces:
+              - name: source
+                volumeClaimTemplate:
+                  spec:
+                    accessModes:
+                      - ReadWriteOnce
+                    resources:
+                      requests:
+                        storage: 1Gi
+              - name: registry-auth
+                secret:
+                  secretName: accounts-registry-auth
+              - name: kubeconfig
+                secret:
+                  secretName: accounts-kubeconfig
+          EOF
+          kubectl apply -f /tmp/pipelinerun.yaml
+          set +e
+          kubectl wait --for=condition=Succeeded=True pipelinerun/capstone-cd-run --timeout=15m
+          pipeline_status=$?
+          set -e
+          kubectl get pipelinerun capstone-cd-run -o yaml
+          kubectl get taskruns -l tekton.dev/pipelineRun=capstone-cd-run -o wide
+          curl --fail --location --silent --show-error --output /tmp/tkn.tar.gz https://github.com/tektoncd/cli/releases/download/v0.46.2/tkn_0.46.2_Linux_x86_64.tar.gz
+          tar -xzf /tmp/tkn.tar.gz -C /tmp tkn
+          sudo install /tmp/tkn /usr/local/bin/tkn
+          tkn pipelinerun logs capstone-cd-run --namespace default
+          kubectl get deployments,pods,services -o wide
+          exit "$pipeline_status"

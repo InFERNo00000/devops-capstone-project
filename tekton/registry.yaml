@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accounts-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: accounts-registry
+  template:
+    metadata:
+      labels:
+        app: accounts-registry
+    spec:
+      containers:
+        - name: registry
+          image: registry:2
+          ports:
+            - name: registry
+              containerPort: 5000
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounts-registry
+spec:
+  type: ClusterIP
+  clusterIP: 10.96.0.100
+  selector:
+    app: accounts-registry
+  ports:
+    - name: registry
+      port: 5000
+      targetPort: registry
