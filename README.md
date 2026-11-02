@@ -1,4 +1,4 @@
-# Accounts REST API
+# DevOps Capstone Project: Accounts REST API
 
 A Flask service for creating, reading, updating, and deleting customer accounts.
 
@@ -33,11 +33,12 @@ accounts return appropriate 4xx responses.
 ```powershell
 flake8 service tests tools run.py
 pylint service tests tools run.py
-python tools/run_nosetests.py
+$env:PYTHONPATH = "tools/nose_compat"
+nosetests
 ```
 
-The wrapper provides compatibility aliases for Nose's deprecated standard-library
-APIs on Python 3.11.
+The `PYTHONPATH` entry provides compatibility aliases for Nose's deprecated
+standard-library APIs on Python 3.11.
 
 ## Security and deployment
 

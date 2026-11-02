@@ -26,5 +26,7 @@ jobs:
         run: flake8 service tests tools run.py
       - name: Lint with Pylint
         run: pylint service tests tools run.py
-      - name: Run unit tests
-        run: python tools/run_nosetests.py
+      - name: Run unit tests using nosetests
+        env:
+          PYTHONPATH: tools/nose_compat
+        run: nosetests
