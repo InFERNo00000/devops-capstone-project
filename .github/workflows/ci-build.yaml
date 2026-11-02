@@ -54,7 +54,9 @@ jobs:
         run: docker build --tag accounts-service:capstone .
       - name: Report container image details
         run: |
-          docker images --no-trunc --format 'Name: {{.Repository}}{{"\n"}}Tag: {{.Tag}}{{"\n"}}Image ID: {{.ID}}{{"\n"}}Created Time: {{.CreatedAt}}{{"\n"}}Size: {{.Size}}' accounts-service
+          image_details="$(docker image inspect --format '{{.Id}} {{.Created}} {{.Size}}' accounts-service:capstone)"
+          read -r image_id created_time image_size <<< "$image_details"
+          printf 'Name: accounts-service\nTag: capstone\nImage ID: %s\nCreated Time: %s\nSize: %s bytes\n' "$image_id" "$created_time" "$image_size"
       - name: Verify container HTTP response
         run: |
           docker run --detach --rm --name accounts-smoke --publish 8080:8080 accounts-service:capstone
