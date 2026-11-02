@@ -12,7 +12,6 @@ python run.py
 ```
 
 The service listens on `http://localhost:8080`. `GET /health` reports service health.
-Use Python 3.8 for the configured legacy `nosetests` runner.
 
 ## API
 
@@ -32,10 +31,13 @@ accounts return appropriate 4xx responses.
 ## Test and lint
 
 ```powershell
-flake8 service tests run.py
-pylint service tests run.py
-nosetests
+flake8 service tests tools run.py
+pylint service tests tools run.py
+python tools/run_nosetests.py
 ```
+
+The wrapper provides compatibility aliases for Nose's deprecated standard-library
+APIs on Python 3.11.
 
 ## Security and deployment
 

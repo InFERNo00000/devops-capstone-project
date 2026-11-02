@@ -11,9 +11,9 @@ spec:
       workingDir: $(workspaces.source.path)
       script: |
         python -m pip install --no-cache-dir -r requirements.txt
-        flake8 service tests run.py
-        pylint service tests run.py
-        nosetests
+        flake8 service tests tools run.py
+        pylint service tests tools run.py
+        python tools/run_nosetests.py
 ---
 apiVersion: tekton.dev/v1
 kind: Task
