@@ -2,7 +2,8 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PORT=8080
+    PORT=8080 \
+    DATABASE_URL=sqlite:////tmp/accounts.db
 
 WORKDIR /app
 COPY requirements.txt .

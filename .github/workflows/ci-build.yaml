@@ -59,14 +59,28 @@ jobs:
           printf 'Name: accounts-service\nTag: capstone\nImage ID: %s\nCreated Time: %s\nSize: %s bytes\n' "$image_id" "$created_time" "$image_size"
       - name: Verify container HTTP response
         run: |
-          docker run --detach --rm --name accounts-smoke --publish 8080:8080 accounts-service:capstone
-          trap 'docker stop accounts-smoke' EXIT
+          docker run --detach --name accounts-smoke --publish 8080:8080 accounts-service:capstone
+          cleanup() {
+            docker logs accounts-smoke 2>/dev/null || true
+            docker rm --force accounts-smoke >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          ready=false
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/health; then
+              ready=true
+              break
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' accounts-smoke 2>/dev/null || true)" != "true" ]; then
               break
             fi
             sleep 2
           done
+          if [ "$ready" != true ]; then
+            docker logs accounts-smoke
+            exit 1
+          fi
+          printf '\n'
           curl --fail --silent --show-error http://127.0.0.1:8080/
           printf '\n'
       - name: Create Kubernetes cluster
