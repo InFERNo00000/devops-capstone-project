@@ -1,0 +1,67 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: accounts-ci
+spec:
+  workspaces:
+    - name: source
+  steps:
+    - name: lint-and-test
+      image: python:3.11-slim
+      workingDir: $(workspaces.source.path)
+      script: |
+        python -m pip install --no-cache-dir -r requirements.txt
+        flake8 service tests run.py
+        pylint service tests run.py
+        nosetests
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: accounts-build
+spec:
+  params:
+    - name: image
+      type: string
+  workspaces:
+    - name: source
+    - name: registry-auth
+  steps:
+    - name: build-and-push
+      image: quay.io/buildah/stable:v1.39.3
+      workingDir: $(workspaces.source.path)
+      env:
+        - name: REGISTRY_AUTH_FILE
+          value: $(workspaces.registry-auth.path)/config.json
+      securityContext:
+        privileged: true
+      script: |
+        buildah bud --storage-driver=vfs --format=docker -t "$(params.image)" .
+        buildah push --storage-driver=vfs "$(params.image)"
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: accounts-deploy
+spec:
+  params:
+    - name: image
+      type: string
+    - name: namespace
+      type: string
+      default: default
+  workspaces:
+    - name: source
+    - name: kubeconfig
+  steps:
+    - name: apply-and-rollout
+      image: bitnami/kubectl:1.32.0
+      workingDir: $(workspaces.source.path)
+      env:
+        - name: KUBECONFIG
+          value: $(workspaces.kubeconfig.path)/config
+      script: |
+        kubectl apply -n "$(params.namespace)" -f k8s/
+        kubectl set image -n "$(params.namespace)" \
+          deployment/accounts accounts="$(params.image)"
+        kubectl rollout status -n "$(params.namespace)" deployment/accounts
